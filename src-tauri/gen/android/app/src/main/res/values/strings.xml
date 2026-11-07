@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">"tauri-tanstack-start-react-template"</string>
+    <string name="main_activity_title">"tauri-tanstack-start-react-template"</string>
+</resources>
