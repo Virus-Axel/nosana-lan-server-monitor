@@ -1,6 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
 
 type ProfileHost = {
     ip: string;
@@ -24,14 +28,220 @@ type Profile = {
 
 type SetupStage = "credentials" | "fingerprint";
 
+type VcsaCell = {
+    character: string;
+    foreground: number;
+    background: number;
+    blink: boolean;
+};
+
+type VcsaScreen = {
+    rows: number;
+    columns: number;
+    cursorX: number;
+    cursorY: number;
+    cells: VcsaCell[];
+};
+
 type ServerOutput = {
-    output: string;
+    output: VcsaScreen | null;
     error: string | null;
     updatedAt: string | null;
     loading: boolean;
 };
 
 const POLL_INTERVAL = 5000;
+
+// -----------------------------------------------------------------------------
+// VGA colors
+// -----------------------------------------------------------------------------
+
+const VGA_COLORS = [
+    "#000000",
+    "#0000AA",
+    "#00AA00",
+    "#00AAAA",
+    "#AA0000",
+    "#AA00AA",
+    "#AA5500",
+    "#AAAAAA",
+    "#555555",
+    "#5555FF",
+    "#55FF55",
+    "#55FFFF",
+    "#FF5555",
+    "#FF55FF",
+    "#FFFF55",
+    "#FFFFFF",
+];
+
+// -----------------------------------------------------------------------------
+// VCSA terminal renderer
+// -----------------------------------------------------------------------------
+
+function VcsaTerminal({ screen }: { screen: VcsaScreen }) {
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    const [containerSize, setContainerSize] = useState({
+        width: 0,
+        height: 0,
+    });
+
+    const fontSize = 8;
+    const lineHeight = fontSize * 1.2;
+
+    // Approximate width of a monospace character at the selected font size.
+    const characterWidth = fontSize * 0.602;
+
+    // Number of characters that fit horizontally.
+    const charactersPerLine =
+        containerSize.width > 0
+            ? Math.max(
+                1,
+                Math.floor(containerSize.width / characterWidth)
+            )
+            : screen.columns;
+
+    // Number of lines that fit vertically.
+    const visibleLines =
+        containerSize.height > 0
+            ? Math.max(
+                1,
+                Math.floor(containerSize.height / lineHeight)
+            )
+            : screen.rows;
+
+    // -------------------------------------------------------------------------
+    // Observe container dimensions
+    // -------------------------------------------------------------------------
+
+    useEffect(() => {
+        const element = containerRef.current;
+
+        if (!element) {
+            return;
+        }
+
+        const updateSize = () => {
+            setContainerSize({
+                width: element.clientWidth,
+                height: element.clientHeight,
+            });
+        };
+
+        updateSize();
+
+        const observer = new ResizeObserver(updateSize);
+        observer.observe(element);
+
+        return () => observer.disconnect();
+    }, []);
+
+    // -------------------------------------------------------------------------
+    // Wrap terminal rows
+    // -------------------------------------------------------------------------
+
+    const wrappedLines: VcsaCell[][] = [];
+
+    for (let row = 0; row < screen.rows; row++) {
+        const rowCells = screen.cells.slice(
+            row * screen.columns,
+            (row + 1) * screen.columns
+        );
+
+        for (
+            let i = 0;
+            i < rowCells.length;
+            i += charactersPerLine
+        ) {
+            wrappedLines.push(
+                rowCells.slice(i, i + charactersPerLine)
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Keep the bottom of the terminal visible
+    // -------------------------------------------------------------------------
+
+    const visibleWrappedLines = wrappedLines.slice(-visibleLines);
+
+    // -------------------------------------------------------------------------
+    // Render
+    // -------------------------------------------------------------------------
+
+    return (
+        <>
+            <style>
+                {`
+                    @keyframes vcsa-blink {
+                        50% {
+                            visibility: hidden;
+                        }
+                    }
+                `}
+            </style>
+
+            <div
+                ref={containerRef}
+                className="flex h-full w-full flex-col justify-end overflow-hidden"
+                style={{
+                    fontFamily: "monospace",
+                    fontSize: `${fontSize}px`,
+                    lineHeight: 1.2,
+                    colorScheme: "only light",
+                }}
+            >
+                <div className="flex shrink-0 flex-col">
+                    {visibleWrappedLines.map((line, lineIndex) => (
+                        <div
+                            key={lineIndex}
+                            className="flex"
+                            style={{
+                                whiteSpace: "pre",
+                                height: `${lineHeight}px`,
+                                flexShrink: 0,
+                            }}
+                        >
+                            {line.map((cell, cellIndex) => (
+                                <span
+                                    key={cellIndex}
+                                    style={{
+                                        color:
+                                            VGA_COLORS[cell.foreground] ??
+                                            VGA_COLORS[7],
+
+                                        backgroundColor:
+                                            VGA_COLORS[cell.background] ??
+                                            VGA_COLORS[0],
+
+                                        animation: cell.blink
+                                            ? "vcsa-blink 1s steps(1, end) infinite"
+                                            : undefined,
+
+                                        width: `${characterWidth}px`,
+                                        height: `${lineHeight}px`,
+                                        flexShrink: 0,
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                    }}
+                                >
+                                    {cell.character}
+                                </span>
+                            ))}
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </>
+    );
+}
+
+// -----------------------------------------------------------------------------
+// Terminal panel
+// -----------------------------------------------------------------------------
+
 function TerminalPanel({
     host,
     serverOutput,
@@ -70,6 +280,9 @@ function TerminalPanel({
 
     return (
         <section className="flex h-[480px] min-w-0 flex-col overflow-hidden rounded-xl border border-zinc-800 bg-[#09090b] shadow-xl">
+
+            {/* Header */}
+
             <div className="flex shrink-0 items-center justify-between border-b border-zinc-800 bg-zinc-900 px-4 py-3">
                 <div className="flex min-w-0 items-center gap-3">
                     <div className="flex shrink-0 items-center gap-1.5">
@@ -91,25 +304,30 @@ function TerminalPanel({
 
                 <div className="flex shrink-0 items-center gap-2">
                     <span className={`h-2 w-2 rounded-full ${statusColor}`} />
+
                     <span className="text-xs text-zinc-400">
                         {status}
                     </span>
                 </div>
             </div>
 
-            {/* Terminal output: scrolling disabled */}
+            {/* Terminal output */}
+
             <div className="min-h-0 flex-1 overflow-hidden bg-[#080808] p-3">
+
                 {!configured && (
                     <div className="font-mono text-sm text-zinc-500">
                         SSH setup required for {host.ip}
                     </div>
                 )}
 
-                {configured && serverOutput?.loading && !serverOutput.updatedAt && (
-                    <div className="font-mono text-sm text-zinc-500">
-                        Connecting to {host.ip}...
-                    </div>
-                )}
+                {configured &&
+                    serverOutput?.loading &&
+                    !serverOutput.updatedAt && (
+                        <div className="font-mono text-sm text-zinc-500">
+                            Connecting to {host.ip}...
+                        </div>
+                    )}
 
                 {configured && serverOutput?.error && (
                     <div className="whitespace-pre-wrap break-words font-mono text-sm text-red-400">
@@ -118,9 +336,9 @@ function TerminalPanel({
                 )}
 
                 {configured && serverOutput?.output && (
-                    <pre className="w-full overflow-hidden whitespace-pre font-mono text-[7px] leading-[1.2] text-[#d4d4d4]">
-                        {serverOutput.output}
-                    </pre>
+                    <div className="flex h-full w-full items-end overflow-hidden">
+                        <VcsaTerminal screen={serverOutput.output} />
+                    </div>
                 )}
 
                 {configured &&
@@ -132,6 +350,8 @@ function TerminalPanel({
                         </div>
                     )}
             </div>
+
+            {/* Footer */}
 
             <div className="flex shrink-0 items-center justify-between border-t border-zinc-800 bg-zinc-900 px-3 py-2 text-[11px] text-zinc-500">
                 <span>{host.networkCidr}</span>
@@ -145,6 +365,10 @@ function TerminalPanel({
         </section>
     );
 }
+
+// -----------------------------------------------------------------------------
+// Dashboard
+// -----------------------------------------------------------------------------
 
 const Dashboard: React.FC = () => {
     const [hosts, setHosts] = useState<ProfileHost[]>([]);
@@ -252,15 +476,16 @@ const Dashboard: React.FC = () => {
                             ...previous,
                             [host.ip]: {
                                 ...previous[host.ip],
-                                output: previous[host.ip]?.output ?? "",
+                                output: previous[host.ip]?.output ?? null,
                                 error: null,
-                                updatedAt: previous[host.ip]?.updatedAt ?? null,
+                                updatedAt:
+                                    previous[host.ip]?.updatedAt ?? null,
                                 loading: true,
                             },
                         }));
 
                         try {
-                            const output = await invoke<string>("run_ls", {
+                            const output = await invoke<VcsaScreen>("run_ls", {
                                 ip: host.ip,
                             });
 
@@ -285,9 +510,11 @@ const Dashboard: React.FC = () => {
                             setServerOutputs((previous) => ({
                                 ...previous,
                                 [host.ip]: {
-                                    output: previous[host.ip]?.output ?? "",
+                                    output:
+                                        previous[host.ip]?.output ?? null,
                                     error: String(err),
-                                    updatedAt: previous[host.ip]?.updatedAt ?? null,
+                                    updatedAt:
+                                        previous[host.ip]?.updatedAt ?? null,
                                     loading: false,
                                 },
                             }));
@@ -561,7 +788,9 @@ const Dashboard: React.FC = () => {
                                         type="text"
                                         autoComplete="username"
                                         value={sshUsername}
-                                        onChange={(e) => setSshUsername(e.target.value)}
+                                        onChange={(e) =>
+                                            setSshUsername(e.target.value)
+                                        }
                                         placeholder="axel"
                                         className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500"
                                     />
@@ -576,7 +805,9 @@ const Dashboard: React.FC = () => {
                                         type="password"
                                         autoComplete="current-password"
                                         value={sshPassword}
-                                        onChange={(e) => setSshPassword(e.target.value)}
+                                        onChange={(e) =>
+                                            setSshPassword(e.target.value)
+                                        }
                                         onKeyDown={(e) => {
                                             if (e.key === "Enter") {
                                                 retrieveFingerprint();
@@ -614,7 +845,9 @@ const Dashboard: React.FC = () => {
                                     <input
                                         type="checkbox"
                                         checked={fingerprintConfirmed}
-                                        onChange={(e) => setFingerprintConfirmed(e.target.checked)}
+                                        onChange={(e) =>
+                                            setFingerprintConfirmed(e.target.checked)
+                                        }
                                         className="mt-1"
                                     />
 

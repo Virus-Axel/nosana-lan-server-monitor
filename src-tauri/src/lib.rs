@@ -1,4 +1,3 @@
-
 use std::{
     fs,
     io::{Read, Write},
@@ -75,6 +74,29 @@ struct ProfileHost {
 struct Profile {
     networks: Vec<ProfileNetwork>,
     hosts: Vec<ProfileHost>,
+}
+
+// -----------------------------------------------------------------------------
+// VCSA screen types
+// -----------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VcsaCell {
+    character: char,
+    foreground: u8,
+    background: u8,
+    blink: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VcsaScreen {
+    rows: usize,
+    columns: usize,
+    cursor_x: usize,
+    cursor_y: usize,
+    cells: Vec<VcsaCell>,
 }
 
 // -----------------------------------------------------------------------------
@@ -823,23 +845,45 @@ fn authenticate_with_key(
 // VCSA decoding
 // -----------------------------------------------------------------------------
 
-fn decode_vcsa(data: &[u8]) -> Result<String, String> {
+/// Decode the Linux VCSA character/attribute buffer.
+///
+/// Header:
+///   Byte 0: number of rows
+///   Byte 1: number of columns
+///   Byte 2: cursor X position
+///   Byte 3: cursor Y position
+///
+/// Each cell:
+///   Byte 0: character
+///   Byte 1: VGA text attribute
+///
+/// VGA text attribute:
+///   Bits 0-3: foreground color
+///   Bits 4-6: background color
+///   Bit 7: blink
+fn decode_vcsa(data: &[u8]) -> Result<VcsaScreen, String> {
     if data.len() < 4 {
         return Err("Invalid VCSA data: missing header".into());
     }
 
     let rows = data[0] as usize;
-    let cols = data[1] as usize;
+    let columns = data[1] as usize;
+    let cursor_x = data[2] as usize;
+    let cursor_y = data[3] as usize;
 
-    if rows == 0 || cols == 0 {
+    if rows == 0 || columns == 0 {
         return Err("Invalid VCSA dimensions".into());
     }
 
+    let cell_count = rows
+        .checked_mul(columns)
+        .ok_or_else(|| "VCSA dimensions overflow".to_string())?;
+
     let expected_size = 4usize
         .checked_add(
-            rows.checked_mul(cols)
-                .and_then(|cells| cells.checked_mul(2))
-                .ok_or_else(|| "VCSA dimensions overflow".to_string())?,
+            cell_count
+                .checked_mul(2)
+                .ok_or_else(|| "VCSA data size overflow".to_string())?,
         )
         .ok_or_else(|| "VCSA data size overflow".to_string())?;
 
@@ -850,32 +894,47 @@ fn decode_vcsa(data: &[u8]) -> Result<String, String> {
         ));
     }
 
-    let mut output = String::with_capacity(rows * (cols + 1));
+    let mut cells = Vec::with_capacity(cell_count);
 
-    for row in 0..rows {
-        for col in 0..cols {
-            let index = 4 + (row * cols + col) * 2;
-            let character = data[index];
+    for index in 0..cell_count {
+        let offset = 4 + index * 2;
 
-            let character = match character {
-                32..=126 => character as char,
-                _ => ' ',
-            };
+        let character_byte = data[offset];
+        let attribute = data[offset + 1];
 
-            output.push(character);
-        }
+        // Keep printable ASCII and extended byte values.
+        // Control characters are represented as spaces.
+        let character = match character_byte {
+            32..=126 | 160..=255 => character_byte as char,
+            _ => ' ',
+        };
 
-        output.push('\n');
+        let foreground = attribute & 0x0F;
+        let background = (attribute >> 4) & 0x07;
+        let blink = (attribute & 0x80) != 0;
+
+        cells.push(VcsaCell {
+            character,
+            foreground,
+            background,
+            blink,
+        });
     }
 
-    Ok(output)
+    Ok(VcsaScreen {
+        rows,
+        columns,
+        cursor_x,
+        cursor_y,
+        cells,
+    })
 }
 
 // -----------------------------------------------------------------------------
 // Read VCSA from a server
 // -----------------------------------------------------------------------------
 
-fn run_ls_blocking(app: &AppHandle, ip: &str) -> Result<String, String> {
+fn run_ls_blocking(app: &AppHandle, ip: &str) -> Result<VcsaScreen, String> {
     let path = profile_path(app)?;
 
     if !path.exists() {
@@ -957,7 +1016,7 @@ fn run_ls_blocking(app: &AppHandle, ip: &str) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn run_ls(app: AppHandle, ip: String) -> Result<String, String> {
+async fn run_ls(app: AppHandle, ip: String) -> Result<VcsaScreen, String> {
     tauri::async_runtime::spawn_blocking(move || run_ls_blocking(&app, &ip))
         .await
         .map_err(|e| format!("SSH VCSA task failed: {e}"))?
