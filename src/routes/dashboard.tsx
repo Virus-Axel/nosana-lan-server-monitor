@@ -144,10 +144,18 @@ function VcsaTerminal({ screen }: { screen: VcsaScreen }) {
     const wrappedLines: VcsaCell[][] = [];
 
     for (let row = 0; row < screen.rows; row++) {
-        const rowCells = screen.cells.slice(
-            row * screen.columns,
-            (row + 1) * screen.columns
-        );
+      const rowCells = screen.cells.slice(
+          row * screen.columns,
+          (row + 1) * screen.columns
+      );
+      
+      // Remove trailing blank cells before wrapping.
+      while (
+          rowCells.length > 0 &&
+          rowCells[rowCells.length - 1].character === " "
+      ) {
+          rowCells.pop();
+      }
 
         for (
             let i = 0;
