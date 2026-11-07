@@ -32,7 +32,6 @@ type ServerOutput = {
 };
 
 const POLL_INTERVAL = 5000;
-
 function TerminalPanel({
     host,
     serverOutput,
@@ -92,14 +91,14 @@ function TerminalPanel({
 
                 <div className="flex shrink-0 items-center gap-2">
                     <span className={`h-2 w-2 rounded-full ${statusColor}`} />
-
                     <span className="text-xs text-zinc-400">
                         {status}
                     </span>
                 </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-auto bg-[#080808] p-3">
+            {/* Terminal output: scrolling disabled */}
+            <div className="min-h-0 flex-1 overflow-hidden bg-[#080808] p-3">
                 {!configured && (
                     <div className="font-mono text-sm text-zinc-500">
                         SSH setup required for {host.ip}
@@ -119,7 +118,7 @@ function TerminalPanel({
                 )}
 
                 {configured && serverOutput?.output && (
-                    <pre className="w-max min-w-full whitespace-pre font-mono text-[13px] leading-[1.2] text-[#d4d4d4]">
+                    <pre className="w-full overflow-hidden whitespace-pre font-mono text-[7px] leading-[1.2] text-[#d4d4d4]">
                         {serverOutput.output}
                     </pre>
                 )}
