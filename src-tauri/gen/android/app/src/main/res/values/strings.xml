@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">"tauri-tanstack-start-react-template"</string>
-    <string name="main_activity_title">"tauri-tanstack-start-react-template"</string>
+    <string name="app_name">"nosana-lan-server-monitor"</string>
+    <string name="main_activity_title">"nosana-lan-server-monitor"</string>
 </resources>
