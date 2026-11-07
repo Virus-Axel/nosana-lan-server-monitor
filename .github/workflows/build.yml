@@ -53,6 +53,34 @@ jobs:
         run: |
           pnpm tauri android init || true
 
+      - name: Install OpenSSL build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential perl pkg-config
+
+      - name: Fix Android NDK toolchain compatibility
+        shell: bash
+        run: |
+          TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          COMPAT_DIR="$RUNNER_TEMP/android-toolchain"
+      
+          mkdir -p "$COMPAT_DIR"
+      
+          for PREFIX in \
+            aarch64-linux-android \
+            arm-linux-androideabi \
+            i686-linux-android \
+            x86_64-linux-android
+          do
+            ln -sf "$TOOLCHAIN/llvm-ranlib" "$COMPAT_DIR/$PREFIX-ranlib"
+            ln -sf "$TOOLCHAIN/llvm-ar" "$COMPAT_DIR/$PREFIX-ar"
+          done
+      
+          echo "$COMPAT_DIR" >> "$GITHUB_PATH"
+      
+          echo "Configured Android NDK compatibility aliases:"
+          ls -l "$COMPAT_DIR"
+
       - name: Build APK (debug)
         run: pnpm tauri android build --debug
 
