@@ -14,9 +14,21 @@ val tauriProperties = Properties().apply {
     }
 }
 
+// Load release signing configuration when available.
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
+}
+
+val hasReleaseSigning = keystorePropertiesFile.exists()
+
 android {
     compileSdk = 37
     namespace = "com.nslm.dev"
+
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
         applicationId = "com.nslm.dev"
@@ -25,12 +37,29 @@ android {
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
     }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("password")
+                storePassword = keystoreProperties.getProperty("password")
+
+                val storePath = keystoreProperties.getProperty("storeFile")
+                    ?: throw GradleException("Missing storeFile in keystore.properties")
+
+                storeFile = file(storePath)
+            }
+        }
+    }
+
     buildTypes {
         getByName("debug") {
             manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = true
             isJniDebuggable = true
             isMinifyEnabled = false
+
             packaging {
                 jniLibs.keepDebugSymbols.add("*/arm64-v8a/*.so")
                 jniLibs.keepDebugSymbols.add("*/armeabi-v7a/*.so")
@@ -38,22 +67,30 @@ android {
                 jniLibs.keepDebugSymbols.add("*/x86_64/*.so")
             }
         }
+
         getByName("release") {
             optimization {
-               enable = true
+                enable = true
             }
+
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+
             proguardFiles(
                 *fileTree(".") {
-                  include("**/*.pro")
-                  exclude("build/**")
+                    include("**/*.pro")
+                    exclude("build/**")
                 }.files.toTypedArray()
             )
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
     }
+
     buildFeatures {
         buildConfig = true
     }

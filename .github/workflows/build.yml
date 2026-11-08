@@ -16,7 +16,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Enable Corepack (pnpm)
         run: corepack enable
@@ -49,9 +49,8 @@ jobs:
                      "platforms;android-34" \
                      "build-tools;34.0.0"
 
-      - name: Initialize Tauri Android (if needed)
-        run: |
-          pnpm tauri android init || true
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Install OpenSSL build dependencies
         run: |
@@ -63,9 +62,9 @@ jobs:
         run: |
           TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
           COMPAT_DIR="$RUNNER_TEMP/android-toolchain"
-      
+
           mkdir -p "$COMPAT_DIR"
-      
+
           for PREFIX in \
             aarch64-linux-android \
             arm-linux-androideabi \
@@ -75,18 +74,130 @@ jobs:
             ln -sf "$TOOLCHAIN/llvm-ranlib" "$COMPAT_DIR/$PREFIX-ranlib"
             ln -sf "$TOOLCHAIN/llvm-ar" "$COMPAT_DIR/$PREFIX-ar"
           done
-      
+
           echo "$COMPAT_DIR" >> "$GITHUB_PATH"
-      
+
           echo "Configured Android NDK compatibility aliases:"
           ls -l "$COMPAT_DIR"
 
+      # --------------------------------------------------
+      # Debug build
+      # --------------------------------------------------
+
       - name: Build APK (debug)
-        run: pnpm tauri android build --debug
+        shell: bash
+        run: |
+          set -e
+
+          for attempt in 1 2 3; do
+            echo "Debug build attempt $attempt of 3"
+
+            if pnpm tauri android build --debug; then
+              exit 0
+            fi
+
+            if [ "$attempt" -lt 3 ]; then
+              echo "Build failed. Retrying in 20 seconds..."
+              sleep 20
+            fi
+          done
+
+          echo "Debug build failed after 3 attempts."
+          exit 1
+
+      # --------------------------------------------------
+      # Configure Android release signing
+      # --------------------------------------------------
+
+      - name: Configure Android release signing
+        shell: bash
+        env:
+          ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$ANDROID_KEY_BASE64" ]]; then
+            echo "Missing ANDROID_KEY_BASE64 secret"
+            exit 1
+          fi
+
+          if [[ -z "$ANDROID_KEY_ALIAS" ]]; then
+            echo "Missing ANDROID_KEY_ALIAS secret"
+            exit 1
+          fi
+
+          if [[ -z "$ANDROID_KEY_PASSWORD" ]]; then
+            echo "Missing ANDROID_KEY_PASSWORD secret"
+            exit 1
+          fi
+
+          ANDROID_DIR="src-tauri/gen/android"
+          KEYSTORE_PATH="$RUNNER_TEMP/nlsm-release-key.jks"
+
+          mkdir -p "$ANDROID_DIR"
+
+          printf '%s' "$ANDROID_KEY_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+
+          cat > "$ANDROID_DIR/keystore.properties" <<EOF
+          keyAlias=$ANDROID_KEY_ALIAS
+          password=$ANDROID_KEY_PASSWORD
+          storeFile=$KEYSTORE_PATH
+          EOF
+
+          chmod 600 "$KEYSTORE_PATH" "$ANDROID_DIR/keystore.properties"
+
+          echo "Android release signing configured."
+
+      # --------------------------------------------------
+      # Release build
+      # --------------------------------------------------
+
+      - name: Build APK (release)
+        shell: bash
+        run: |
+          set -e
+
+          for attempt in 1 2 3; do
+            echo "Release build attempt $attempt of 3"
+
+            if pnpm tauri android build; then
+              exit 0
+            fi
+
+            if [ "$attempt" -lt 3 ]; then
+              echo "Build failed. Retrying in 20 seconds..."
+              sleep 20
+            fi
+          done
+
+          echo "Release build failed after 3 attempts."
+          exit 1
+
+      - name: Verify release APK signature
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK=$(find src-tauri/gen/android/app/build/outputs/apk/universal/release \
+            -name "*.apk" -type f | head -n 1)
+
+          if [[ -z "$APK" ]]; then
+            echo "Release APK not found"
+            exit 1
+          fi
+
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" \
+            -name apksigner -type f | sort -V | tail -n 1)
+
+          "$APKSIGNER" verify --verbose "$APK"
+
+          echo "Verified signed APK: $APK"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: android-apk
-          path: |
-            src-tauri/gen/android/app/build/outputs/apk/**/**/*.apk
+          name: Upload APK artifact
+          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
