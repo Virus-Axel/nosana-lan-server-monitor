@@ -35,6 +35,7 @@ const Home: React.FC = () => {
     const [hosts, setHosts] = useState<Host[]>([]);
 
     const [loadingNetworks, setLoadingNetworks] = useState(false);
+    const [refreshComplete, setRefreshComplete] = useState(false);
     const [scanningNetwork, setScanningNetwork] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
 
@@ -45,8 +46,9 @@ const Home: React.FC = () => {
     // Load networks
     // -------------------------------------------------------------------------
 
-    const refreshNetworks = useCallback(async () => {
+    const refreshNetworks = useCallback(async (showCompletion = false) => {
         setLoadingNetworks(true);
+        setRefreshComplete(false);
         setError(null);
 
         try {
@@ -64,6 +66,14 @@ const Home: React.FC = () => {
                     };
                 })
             );
+
+            if (showCompletion) {
+                setRefreshComplete(true);
+
+                window.setTimeout(() => {
+                    setRefreshComplete(false);
+                }, 1500);
+            }
         } catch (err) {
             setError(String(err));
         } finally {
@@ -266,11 +276,82 @@ const Home: React.FC = () => {
 
                     <div className="flex items-center gap-3">
                         <button
-                            onClick={refreshNetworks}
+                            onClick={() => refreshNetworks(true)}
                             disabled={loadingNetworks}
-                            className="rounded-lg border border-zinc-800 px-4 py-2 text-sm text-zinc-300 transition hover:bg-zinc-900 disabled:opacity-50"
+                            aria-live="polite"
+                            className={`inline-flex min-w-[124px] items-center justify-center gap-2 rounded-lg border px-4 py-2 text-sm transition disabled:cursor-wait ${
+                                loadingNetworks
+                                    ? "border-blue-500/50 bg-blue-500/10 text-blue-300"
+                                    : refreshComplete
+                                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/15"
+                                        : "border-zinc-800 text-zinc-300 hover:bg-zinc-900"
+                            }`}
                         >
-                            {loadingNetworks ? "Refreshing..." : "Refresh"}
+                            {loadingNetworks ? (
+                                <>
+                                    <svg
+                                        className="h-4 w-4 animate-spin"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        aria-hidden="true"
+                                    >
+                                        <circle
+                                            className="opacity-25"
+                                            cx="12"
+                                            cy="12"
+                                            r="9"
+                                            stroke="currentColor"
+                                            strokeWidth="3"
+                                        />
+                                        <path
+                                            className="opacity-90"
+                                            fill="currentColor"
+                                            d="M12 3a9 9 0 0 1 9 9h-3a6 6 0 0 0-6-6V3Z"
+                                        />
+                                    </svg>
+
+                                    {networks.length === 0
+                                        ? "Discovering..."
+                                        : "Refreshing..."}
+                                </>
+                            ) : refreshComplete ? (
+                                <>
+                                    <svg
+                                        className="h-4 w-4"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2.5"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        aria-hidden="true"
+                                    >
+                                        <path d="m5 12 4 4L19 6" />
+                                    </svg>
+
+                                    Updated
+                                </>
+                            ) : (
+                                <>
+                                    <svg
+                                        className="h-4 w-4"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        aria-hidden="true"
+                                    >
+                                        <path d="M20 7v5h-5" />
+                                        <path d="M4 17v-5h5" />
+                                        <path d="M5.6 9A7 7 0 0 1 18 6l2 6" />
+                                        <path d="M18.4 15A7 7 0 0 1 6 18l-2-6" />
+                                    </svg>
+
+                                    Refresh
+                                </>
+                            )}
                         </button>
 
                         <Link
