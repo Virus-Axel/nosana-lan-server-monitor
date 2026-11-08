@@ -698,7 +698,7 @@ const Dashboard: React.FC = () => {
                         )}
 
                         <Link
-                            to="/"
+                            to="/network-config"
                             className="rounded-lg border border-zinc-800 px-4 py-2 text-sm text-zinc-300 transition hover:bg-zinc-900"
                         >
                             Network setup
@@ -729,7 +729,7 @@ const Dashboard: React.FC = () => {
                         </p>
 
                         <Link
-                            to="/"
+                            to="/network-config"
                             className="mt-5 inline-block rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500"
                         >
                             Open network setup
