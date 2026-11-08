@@ -287,7 +287,7 @@ function TerminalPanel({
     }
 
     return (
-        <section className="flex h-[480px] min-w-0 flex-col overflow-hidden rounded-xl border border-zinc-800 bg-[#09090b] shadow-xl">
+        <section className="flex h-[280px] min-w-0 flex-col overflow-hidden rounded-xl border border-zinc-800 bg-[#09090b] shadow-xl">
 
             {/* Header */}
 
